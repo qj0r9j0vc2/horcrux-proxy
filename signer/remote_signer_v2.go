@@ -6,6 +6,7 @@ import (
 	"net"
 	"time"
 
+	cometbftprivvalv1 "github.com/cometbft/cometbft/api/cometbft/privval/v1"
 	cometcryptoed25519 "github.com/cometbft/cometbft/crypto/ed25519"
 	cometlog "github.com/cometbft/cometbft/libs/log"
 	cometnet "github.com/cometbft/cometbft/libs/net"
@@ -161,20 +162,28 @@ func (rs *ReconnRemoteSignerV2) HandleLegacyConnection(conn net.Conn) error {
 }
 
 func (rs *ReconnRemoteSignerV2) HandleV1Connection(conn net.Conn) error {
-	// Read v1 message
-	msg, err := rs.readV1Msg(conn)
+	// Read v1 message using cometbftprivvalv1.Message
+	if rs.maxReadSize <= 0 {
+		rs.maxReadSize = 1024 * 1024 // 1MB
+	}
+
+	var msg cometbftprivvalv1.Message
+	protoReader := protoio.NewDelimitedReader(conn, rs.maxReadSize)
+	n, err := protoReader.ReadMsg(&msg)
 	if err != nil {
 		if err == io.EOF {
-			return fmt.Errorf("readV1Msg: connection closed by client (EOF)")
+			return fmt.Errorf("connection closed by client (EOF)")
 		}
-		return fmt.Errorf("readV1Msg: %w", err)
+		return fmt.Errorf("failed to read V1 message: %w", err)
 	}
 
-	// Log the received message type for debugging
-	if msg != nil && msg.Sum != nil {
-		rs.Logger.Debug("Received V1 message", "type", fmt.Sprintf("%T", msg.Sum))
-	}
+	rs.Logger.Debug("Received V1 message", "bytes", n, "type", fmt.Sprintf("%T", msg.Sum))
 
+	// Process the request
+	return rs.handleV1Message(conn, &msg)
+}
+
+func (rs *ReconnRemoteSignerV2) handleV1Message(conn net.Conn, msg *cometbftprivvalv1.Message) error {
 	// Convert v1 message to legacy format and process
 	legacyReq, err := rs.ConvertV1ToLegacyRequest(msg)
 	if err != nil {
@@ -206,32 +215,17 @@ func (rs *ReconnRemoteSignerV2) HandleV1Connection(conn net.Conn) error {
 	return nil
 }
 
-func (rs *ReconnRemoteSignerV2) readV1Msg(reader io.Reader) (*privval.V1Message, error) {
-	if rs.maxReadSize <= 0 {
-		rs.maxReadSize = 1024 * 1024 // 1MB
+func (rs *ReconnRemoteSignerV2) writeV1Msg(writer io.Writer, msg *cometbftprivvalv1.Message) error {
+	if msg == nil {
+		return fmt.Errorf("cannot write nil message")
 	}
-	protoReader := protoio.NewDelimitedReader(reader, rs.maxReadSize)
-	var msg privval.V1Message
-	n, err := protoReader.ReadMsg(&msg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read message (bytes read: %d): %w", n, err)
-	}
-	
-	// Check if message was properly parsed
-	if msg.Sum == nil {
-		return nil, fmt.Errorf("readV1Msg: received empty v1 message (Sum is nil, bytes read: %d)", n)
-	}
-	
-	return &msg, nil
-}
 
-func (rs *ReconnRemoteSignerV2) writeV1Msg(writer io.Writer, msg *privval.V1Message) error {
 	protoWriter := protoio.NewDelimitedWriter(writer)
 	_, err := protoWriter.WriteMsg(msg)
 	return err
 }
 
-func (rs *ReconnRemoteSignerV2) ConvertV1ToLegacyRequest(v1Msg *privval.V1Message) (*cometprotoprivval.Message, error) {
+func (rs *ReconnRemoteSignerV2) ConvertV1ToLegacyRequest(v1Msg *cometbftprivvalv1.Message) (*cometprotoprivval.Message, error) {
 	if v1Msg == nil || v1Msg.Sum == nil {
 		return nil, fmt.Errorf("ConvertV1ToLegacyRequest: v1 message or its Sum field is nil")
 	}
@@ -239,7 +233,7 @@ func (rs *ReconnRemoteSignerV2) ConvertV1ToLegacyRequest(v1Msg *privval.V1Messag
 	var legacyMsg cometprotoprivval.Message
 
 	switch msg := v1Msg.Sum.(type) {
-	case *privval.V1Message_PubKeyRequest:
+	case *cometbftprivvalv1.Message_PubKeyRequest:
 		req, err := rs.protocol.ConvertPubKeyRequest(msg.PubKeyRequest)
 		if err != nil {
 			return nil, err
@@ -248,7 +242,7 @@ func (rs *ReconnRemoteSignerV2) ConvertV1ToLegacyRequest(v1Msg *privval.V1Messag
 			PubKeyRequest: req,
 		}
 
-	case *privval.V1Message_SignVoteRequest:
+	case *cometbftprivvalv1.Message_SignVoteRequest:
 		req, err := rs.protocol.ConvertSignVoteRequest(msg.SignVoteRequest)
 		if err != nil {
 			return nil, err
@@ -257,7 +251,7 @@ func (rs *ReconnRemoteSignerV2) ConvertV1ToLegacyRequest(v1Msg *privval.V1Messag
 			SignVoteRequest: req,
 		}
 
-	case *privval.V1Message_SignProposalRequest:
+	case *cometbftprivvalv1.Message_SignProposalRequest:
 		req, err := rs.protocol.ConvertSignProposalRequest(msg.SignProposalRequest)
 		if err != nil {
 			return nil, err
@@ -266,7 +260,7 @@ func (rs *ReconnRemoteSignerV2) ConvertV1ToLegacyRequest(v1Msg *privval.V1Messag
 			SignProposalRequest: req,
 		}
 
-	case *privval.V1Message_PingRequest:
+	case *cometbftprivvalv1.Message_PingRequest:
 		req, err := rs.protocol.ConvertPingRequest(msg.PingRequest)
 		if err != nil {
 			return nil, err
@@ -282,8 +276,8 @@ func (rs *ReconnRemoteSignerV2) ConvertV1ToLegacyRequest(v1Msg *privval.V1Messag
 	return &legacyMsg, nil
 }
 
-func (rs *ReconnRemoteSignerV2) ConvertLegacyToV1Response(legacyMsg *cometprotoprivval.Message) (*privval.V1Message, error) {
-	var v1Msg privval.V1Message
+func (rs *ReconnRemoteSignerV2) ConvertLegacyToV1Response(legacyMsg *cometprotoprivval.Message) (*cometbftprivvalv1.Message, error) {
+	var v1Msg cometbftprivvalv1.Message
 
 	switch msg := legacyMsg.Sum.(type) {
 	case *cometprotoprivval.Message_PubKeyResponse:
@@ -291,8 +285,8 @@ func (rs *ReconnRemoteSignerV2) ConvertLegacyToV1Response(legacyMsg *cometprotop
 		if err != nil {
 			return nil, err
 		}
-		if v1Res, ok := res.(*privval.V1PubKeyResponse); ok {
-			v1Msg.Sum = &privval.V1Message_PubKeyResponse{
+		if v1Res, ok := res.(*cometbftprivvalv1.PubKeyResponse); ok {
+			v1Msg.Sum = &cometbftprivvalv1.Message_PubKeyResponse{
 				PubKeyResponse: v1Res,
 			}
 		} else {
@@ -304,8 +298,8 @@ func (rs *ReconnRemoteSignerV2) ConvertLegacyToV1Response(legacyMsg *cometprotop
 		if err != nil {
 			return nil, err
 		}
-		if v1Res, ok := res.(*privval.V1SignedVoteResponse); ok {
-			v1Msg.Sum = &privval.V1Message_SignedVoteResponse{
+		if v1Res, ok := res.(*cometbftprivvalv1.SignedVoteResponse); ok {
+			v1Msg.Sum = &cometbftprivvalv1.Message_SignedVoteResponse{
 				SignedVoteResponse: v1Res,
 			}
 		} else {
@@ -317,8 +311,8 @@ func (rs *ReconnRemoteSignerV2) ConvertLegacyToV1Response(legacyMsg *cometprotop
 		if err != nil {
 			return nil, err
 		}
-		if v1Res, ok := res.(*privval.V1SignedProposalResponse); ok {
-			v1Msg.Sum = &privval.V1Message_SignedProposalResponse{
+		if v1Res, ok := res.(*cometbftprivvalv1.SignedProposalResponse); ok {
+			v1Msg.Sum = &cometbftprivvalv1.Message_SignedProposalResponse{
 				SignedProposalResponse: v1Res,
 			}
 		} else {
@@ -330,8 +324,8 @@ func (rs *ReconnRemoteSignerV2) ConvertLegacyToV1Response(legacyMsg *cometprotop
 		if err != nil {
 			return nil, err
 		}
-		if v1Res, ok := res.(*privval.V1PingResponse); ok {
-			v1Msg.Sum = &privval.V1Message_PingResponse{
+		if v1Res, ok := res.(*cometbftprivvalv1.PingResponse); ok {
+			v1Msg.Sum = &cometbftprivvalv1.Message_PingResponse{
 				PingResponse: v1Res,
 			}
 		} else {

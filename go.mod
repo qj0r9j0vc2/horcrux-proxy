@@ -6,6 +6,7 @@ toolchain go1.24.2
 
 require (
 	github.com/cometbft/cometbft v0.38.15
+	github.com/cometbft/cometbft/api v1.0.0
 	github.com/cosmos/gogoproto v1.7.0
 	github.com/spf13/cobra v1.8.1
 	github.com/strangelove-ventures/horcrux/v3 v3.2.4-0.20240110005509-64e1e6faa0e5

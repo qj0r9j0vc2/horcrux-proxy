@@ -18,6 +18,7 @@ const (
 	flagGRPCAddress     = "grpc"
 	flagOperator        = "operator"
 	flagSentry          = "sentry"
+	flagSentryLabel     = "sentry-label"
 	flagMaxReadSize     = "max-read-size"
 	flagProtocolVersion = "protocol-version"
 )
@@ -76,7 +77,7 @@ func startCmd() *cobra.Command {
 			maxReadSize, _ := cmd.Flags().GetInt(flagMaxReadSize)
 			protocolVersion, _ := cmd.Flags().GetString(flagProtocolVersion)
 
-			watcher, err := NewSentryWatcher(ctx, logger, all, hc, operator, sentries, maxReadSize, protocolVersion)
+			watcher, err := NewSentryWatcher(ctx, labels, logger, all, hc, operator, sentries, maxReadSize, protocolVersion)
 			if err != nil {
 				return err
 			}

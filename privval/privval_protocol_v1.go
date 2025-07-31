@@ -2,6 +2,8 @@ package privval
 
 import (
 	"fmt"
+	cometbftprivvalv1 "github.com/cometbft/cometbft/api/cometbft/privval/v1"
+	cometbfttypesv1 "github.com/cometbft/cometbft/api/cometbft/types/v1"
 
 	cometprotocrypto "github.com/cometbft/cometbft/proto/tendermint/crypto"
 	cometprotoprivval "github.com/cometbft/cometbft/proto/tendermint/privval"
@@ -20,7 +22,7 @@ func (p *V1Protocol) GetProtocolVersion() string {
 }
 
 func (p *V1Protocol) ConvertPubKeyRequest(req interface{}) (*cometprotoprivval.PubKeyRequest, error) {
-	if v1Req, ok := req.(*V1PubKeyRequest); ok {
+	if v1Req, ok := req.(*cometbftprivvalv1.PubKeyRequest); ok {
 		// v1 PubKeyRequest has the same structure, just convert
 		return &cometprotoprivval.PubKeyRequest{
 			ChainId: v1Req.ChainId,
@@ -30,9 +32,9 @@ func (p *V1Protocol) ConvertPubKeyRequest(req interface{}) (*cometprotoprivval.P
 }
 
 func (p *V1Protocol) ConvertPubKeyResponse(pubKey *cometprotocrypto.PublicKey, err error) (interface{}, error) {
-	var v1Error *V1RemoteSignerError
+	var v1Error *cometbftprivvalv1.RemoteSignerError
 	if err != nil {
-		v1Error = &V1RemoteSignerError{
+		v1Error = &cometbftprivvalv1.RemoteSignerError{
 			Code:        0,
 			Description: err.Error(),
 		}
@@ -52,7 +54,7 @@ func (p *V1Protocol) ConvertPubKeyResponse(pubKey *cometprotocrypto.PublicKey, e
 		}
 	}
 
-	return &V1PubKeyResponse{
+	return &cometbftprivvalv1.PubKeyResponse{
 		PubKeyBytes: pubKeyBytes,
 		PubKeyType:  pubKeyType,
 		Error:       v1Error,
@@ -60,20 +62,20 @@ func (p *V1Protocol) ConvertPubKeyResponse(pubKey *cometprotocrypto.PublicKey, e
 }
 
 func (p *V1Protocol) ConvertSignVoteRequest(req interface{}) (*cometprotoprivval.SignVoteRequest, error) {
-	if v1Req, ok := req.(*V1SignVoteRequest); ok {
+	if v1Req, ok := req.(*cometbftprivvalv1.SignVoteRequest); ok {
 		// Convert v1 Vote to legacy format
 		vote := &cometproto.Vote{
 			Type:   cometproto.SignedMsgType(v1Req.Vote.Type),
 			Height: v1Req.Vote.Height,
 			Round:  v1Req.Vote.Round,
 			BlockID: cometproto.BlockID{
-				Hash: v1Req.Vote.BlockId.Hash,
+				Hash: v1Req.Vote.BlockID.Hash,
 				PartSetHeader: cometproto.PartSetHeader{
-					Total: v1Req.Vote.BlockId.PartSetHeader.Total,
-					Hash:  v1Req.Vote.BlockId.PartSetHeader.Hash,
+					Total: v1Req.Vote.BlockID.PartSetHeader.Total,
+					Hash:  v1Req.Vote.BlockID.PartSetHeader.Hash,
 				},
 			},
-			Timestamp:          *v1Req.Vote.Timestamp,
+			Timestamp:          v1Req.Vote.Timestamp,
 			ValidatorAddress:   v1Req.Vote.ValidatorAddress,
 			ValidatorIndex:     v1Req.Vote.ValidatorIndex,
 			Signature:          v1Req.Vote.Signature,
@@ -90,29 +92,29 @@ func (p *V1Protocol) ConvertSignVoteRequest(req interface{}) (*cometprotoprivval
 }
 
 func (p *V1Protocol) ConvertSignVoteResponse(vote *cometproto.Vote, err error) (interface{}, error) {
-	var v1Error *V1RemoteSignerError
+	var v1Error *cometbftprivvalv1.RemoteSignerError
 	if err != nil {
-		v1Error = &V1RemoteSignerError{
+		v1Error = &cometbftprivvalv1.RemoteSignerError{
 			Code:        0,
 			Description: err.Error(),
 		}
 	}
 
 	// Convert legacy vote to v1 format
-	var v1Vote *V1Vote
+	var v1Vote cometbfttypesv1.Vote
 	if vote != nil {
-		v1Vote = &V1Vote{
-			Type:   V1SignedMsgType(vote.Type),
+		v1Vote = cometbfttypesv1.Vote{
+			Type:   cometbfttypesv1.SignedMsgType(vote.Type),
 			Height: vote.Height,
 			Round:  vote.Round,
-			BlockId: &V1BlockID{
+			BlockID: cometbfttypesv1.BlockID{
 				Hash: vote.BlockID.Hash,
-				PartSetHeader: &V1PartSetHeader{
+				PartSetHeader: cometbfttypesv1.PartSetHeader{
 					Total: vote.BlockID.PartSetHeader.Total,
 					Hash:  vote.BlockID.PartSetHeader.Hash,
 				},
 			},
-			Timestamp:          &vote.Timestamp,
+			Timestamp:          vote.Timestamp,
 			ValidatorAddress:   vote.ValidatorAddress,
 			ValidatorIndex:     vote.ValidatorIndex,
 			Signature:          vote.Signature,
@@ -121,14 +123,14 @@ func (p *V1Protocol) ConvertSignVoteResponse(vote *cometproto.Vote, err error) (
 		}
 	}
 
-	return &V1SignedVoteResponse{
+	return &cometbftprivvalv1.SignedVoteResponse{
 		Vote:  v1Vote,
 		Error: v1Error,
 	}, nil
 }
 
 func (p *V1Protocol) ConvertSignProposalRequest(req interface{}) (*cometprotoprivval.SignProposalRequest, error) {
-	if v1Req, ok := req.(*V1SignProposalRequest); ok {
+	if v1Req, ok := req.(*cometbftprivvalv1.SignProposalRequest); ok {
 		// Convert v1 Proposal to legacy format
 		proposal := &cometproto.Proposal{
 			Type:     cometproto.SignedMsgType(v1Req.Proposal.Type),
@@ -136,13 +138,13 @@ func (p *V1Protocol) ConvertSignProposalRequest(req interface{}) (*cometprotopri
 			Round:    v1Req.Proposal.Round,
 			PolRound: v1Req.Proposal.PolRound,
 			BlockID: cometproto.BlockID{
-				Hash: v1Req.Proposal.BlockId.Hash,
+				Hash: v1Req.Proposal.BlockID.Hash,
 				PartSetHeader: cometproto.PartSetHeader{
-					Total: v1Req.Proposal.BlockId.PartSetHeader.Total,
-					Hash:  v1Req.Proposal.BlockId.PartSetHeader.Hash,
+					Total: v1Req.Proposal.BlockID.PartSetHeader.Total,
+					Hash:  v1Req.Proposal.BlockID.PartSetHeader.Hash,
 				},
 			},
-			Timestamp: *v1Req.Proposal.Timestamp,
+			Timestamp: v1Req.Proposal.Timestamp,
 			Signature: v1Req.Proposal.Signature,
 		}
 
@@ -155,42 +157,42 @@ func (p *V1Protocol) ConvertSignProposalRequest(req interface{}) (*cometprotopri
 }
 
 func (p *V1Protocol) ConvertSignProposalResponse(proposal *cometproto.Proposal, err error) (interface{}, error) {
-	var v1Error *V1RemoteSignerError
+	var v1Error *cometbftprivvalv1.RemoteSignerError
 	if err != nil {
-		v1Error = &V1RemoteSignerError{
+		v1Error = &cometbftprivvalv1.RemoteSignerError{
 			Code:        0,
 			Description: err.Error(),
 		}
 	}
 
 	// Convert legacy proposal to v1 format
-	var v1Proposal *V1Proposal
+	var v1Proposal cometbfttypesv1.Proposal
 	if proposal != nil {
-		v1Proposal = &V1Proposal{
-			Type:     V1SignedMsgType(proposal.Type),
+		v1Proposal = cometbfttypesv1.Proposal{
+			Type:     cometbfttypesv1.SignedMsgType(proposal.Type),
 			Height:   proposal.Height,
 			Round:    proposal.Round,
 			PolRound: proposal.PolRound,
-			BlockId: &V1BlockID{
+			BlockID: cometbfttypesv1.BlockID{
 				Hash: proposal.BlockID.Hash,
-				PartSetHeader: &V1PartSetHeader{
+				PartSetHeader: cometbfttypesv1.PartSetHeader{
 					Total: proposal.BlockID.PartSetHeader.Total,
 					Hash:  proposal.BlockID.PartSetHeader.Hash,
 				},
 			},
-			Timestamp: &proposal.Timestamp,
+			Timestamp: proposal.Timestamp,
 			Signature: proposal.Signature,
 		}
 	}
 
-	return &V1SignedProposalResponse{
+	return &cometbftprivvalv1.SignedProposalResponse{
 		Proposal: v1Proposal,
 		Error:    v1Error,
 	}, nil
 }
 
 func (p *V1Protocol) ConvertPingRequest(req interface{}) (*cometprotoprivval.PingRequest, error) {
-	if _, ok := req.(*V1PingRequest); ok {
+	if _, ok := req.(*cometbftprivvalv1.PingRequest); ok {
 		// v1 PingRequest has the same structure
 		return &cometprotoprivval.PingRequest{}, nil
 	}
@@ -198,12 +200,12 @@ func (p *V1Protocol) ConvertPingRequest(req interface{}) (*cometprotoprivval.Pin
 }
 
 func (p *V1Protocol) ConvertPingResponse() (interface{}, error) {
-	return &V1PingResponse{}, nil
+	return &cometbftprivvalv1.PingResponse{}, nil
 }
 
 func (p *V1Protocol) HandleMessage(msg interface{}) (interface{}, error) {
-	// V1 protocol uses V1Message
-	if v1Msg, ok := msg.(*V1Message); ok {
+	// V1 protocol uses cometbftprivvalv1.Message
+	if v1Msg, ok := msg.(*cometbftprivvalv1.Message); ok {
 		return v1Msg, nil
 	}
 	return nil, fmt.Errorf("invalid message type for v1 protocol")
